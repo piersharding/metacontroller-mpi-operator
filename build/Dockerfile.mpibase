@@ -1,0 +1,222 @@
+ARG UBUNTU_BASED_BASE_IMAGE
+FROM $UBUNTU_BASED_BASE_IMAGE
+
+
+ARG arg_openmpi_pkg
+RUN \
+    echo "Adding packages: ${arg_openmpi_pkg}"
+
+MAINTAINER Piers Harding "piers@catalyst.net.nz"
+
+ARG SSH_USER=openmpi
+ENV SSH_USER=$SSH_USER
+ARG SSH_UID=1000
+ARG SSH_GID=1000
+ARG OPENMPI_VERSION
+ARG WITH_OPENMPI_BUILD="false"
+ARG HOME=/home/$SSH_USER
+
+ENV LANG en_NZ.UTF-8
+ENV LANGUAGE en_NZ.UTF-8
+ENV LC_ALL en_NZ.UTF-8
+ENV HOME /root
+# Disable prompts from apt.
+ENV DEBIAN_FRONTEND noninteractive
+
+# install ssh and basic dependencies
+RUN apt-get update && \
+    apt-get install -yq --no-install-recommends \
+      locales wget ca-certificates ssh build-essential && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+RUN \
+    apt-get update -y && \
+    apt-get install -y locales tzdata net-tools dnsutils telnet iproute2 \
+            iperf3 fio vim-tiny bash-completion software-properties-common \
+            build-essential curl wget fonts-liberation ca-certificates && \
+    echo "Setting locales  ..." && /usr/sbin/locale-gen en_US.UTF-8 && \
+    /usr/sbin/locale-gen en_NZ.UTF-8 && \
+    echo "Setting timezone ..." &&  /bin/echo 'Pacific/Auckland' | tee /etc/timezone && DEBIAN_FRONTEND=noninteractive dpkg-reconfigure --frontend noninteractive tzdata
+
+    # apt-get install -y git make gcc libhdf5-dev libfftw3-dev libopenmpi-dev
+
+RUN \
+    apt-get update -y && \
+    apt-get install -y git make gcc \
+                       autoconf automake gfortran \
+                       libtool libtool-bin \
+                       zlib1g-dev libsz2 libaec-dev \
+                       librados-dev libfftw3-dev \
+                       gdb  ${arg_openmpi_pkg} && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+COPY ./gstack.sh /usr/bin/gstack.sh
+COPY ./gstack.sh /usr/bin/gstack
+RUN chmod a+x /usr/bin/gstack.sh /usr/bin/gstack
+
+#
+# install openmpi
+#
+RUN echo "WITH_OPENMPI_BUILD=$WITH_OPENMPI_BUILD"
+RUN cd /tmp && \
+  if [ "$WITH_OPENMPI_BUILD" = "true" ]; then \
+  wget -q https://www.open-mpi.org/software/ompi/v$(echo $OPENMPI_VERSION | sed -e s'/\(.*\)\.[0-9]/\1/')/downloads/openmpi-$OPENMPI_VERSION.tar.bz2 && \
+  tar -xjf openmpi-$OPENMPI_VERSION.tar.bz2 && \
+  cd /tmp/openmpi-$OPENMPI_VERSION && \
+  ./configure -v --prefix=/usr --enable-mpi-thread-multiple \
+   --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++ \
+   --enable-shared --enable-linker-build-id --libexecdir=/usr/lib \
+   --without-included-gettext --enable-threads=posix --libdir=/usr/lib \
+   --enable-nls --with-sysroot=/ --enable-clocale=gnu \
+   --enable-libstdcxx-debug --enable-libstdcxx-time=yes \
+   --with-default-libstdcxx-abi=new --enable-gnu-unique-object \
+   --disable-vtable-verify --enable-libmpx --enable-plugin \
+   --with-system-zlib --disable-browser-plugin --enable-java-awt=gtk \
+   --enable-gtk-cairo --with-arch-directory=amd64 \
+   --enable-objc-gc --enable-multiarch --disable-werror --with-arch-32=i686 \
+   --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib \
+   --with-tune=generic --enable-checking=release && \
+  make -j2 && \
+  make install && \
+  rm -r /tmp/openmpi-$OPENMPI_VERSION; \
+  else \
+  apt-get update -y && \
+  apt-get update && apt install -y \
+   libopenmpi-dev libopenmpi2 openmpi-common openmpi-bin; \
+  fi && \
+  mpirun -V && \
+  apt-get clean && \
+  rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+# install HDF5
+# RUN apt-get update && \
+#   apt-get install -y git make gcc libhdf5-dev libfftw3-dev ${arg_openmpi_pkg} && \
+#   rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+
+# RUN \
+#     git clone https://bitbucket.hdfgroup.org/scm/~nfortne2/hdf5_naf.git \
+#      --branch hdf5_rados --single-branch --depth 1 /tmp/src && \
+#     cd /tmp/src && \
+#     ./autogen.sh && \
+#     export CC=/usr/bin/mpicc && \
+#     export LIBS="-lrados" && \
+#     export CPPFLAGS="-I/usr/lib/x86_64-linux-gnu/openmpi/include/openmpi -I/usr/lib/x86_64-linux-gnu/openmpi/include/openmpi/opal/mca/event/libevent2022/libevent -I/usr/lib/x86_64-linux-gnu/openmpi/include/openmpi/opal/mca/event/libevent2022/libevent/include -I/usr/lib/x86_64-linux-gnu/openmpi/include" && \
+#     export LDFLAGS="-pthread -L/usr/lib -L/usr/lib/x86_64-linux-gnu/openmpi/lib -lmpi_cxx -lmpi -lrados -lpthread -lsz -lz -ldl -lm" && \
+#     ./configure --prefix=/usr --host=x86_64-linux-gnu \
+#           --build=x86_64-linux-gnu \
+#            --enable-parallel=yes \
+#           --libdir=/usr/lib/x86_64-linux-gnu \
+#           --mandir=/usr/share/man \
+#           --with-default-plugindir=/usr/lib/x86_64-linux-gnu/hdf5/plugins \
+#           --with-pthread \
+#           --enable-unsupported \
+#           --enable-shared \
+#            --enable-build-mode=production \
+#           --disable-sharedlib-rpath --with-zlib --with-default-api-version=v18 \
+#           --with-szlib \
+#           --enable-fortran \
+#           --enable-threadsafe --enable-cxx && \
+#           make VERBOSE=1 V=1 && \
+#           make check-s && \
+#           make install && \
+#           cd /tmp && rm -rf /tmp/src
+
+# build HDF5
+RUN \
+    git clone https://bitbucket.hdfgroup.org/scm/~nfortne2/hdf5_naf.git \
+     --branch hdf5_rados --single-branch --depth 1 /tmp/src && \
+    cd /tmp/src && \
+    ./autogen.sh && \
+    export CC=/usr/bin/mpicc && \
+    export LDFLAGS="-lrados -lpthread -lz" && \
+    ./configure --prefix=/usr \
+                --enable-parallel \
+                --with-pthread \
+                --enable-shared \
+                --enable-build-mode=debug \
+                --with-zlib && \
+          make && \
+          make install && \
+          cd /tmp && rm -rf /tmp/src
+
+# build HDF5
+
+# RUN \
+#     git clone https://bitbucket.hdfgroup.org/scm/~nfortne2/hdf5_naf.git \
+#      --branch hdf5_rados --single-branch --depth 1 /tmp/src && \
+#     cd /tmp/src && \
+#     ./autogen.sh && \
+#     export CC=/usr/bin/mpicc && \
+#     export LDFLAGS="-lrados -lz" && \
+#     ./configure --prefix=/usr \
+#                 --enable-parallel \
+#                 --enable-threadsafe \
+#                 --enable-unsupported \
+#                 --enable-build-mode=debug \
+#                 --with-zlib && \
+#           make && \
+#           make install && \
+#           cd /tmp && rm -rf /tmp/src
+
+# COPY ./hdf5_naf /tmp/src
+
+# RUN \
+#     cd /tmp/src && \
+#     ./autogen.sh && \
+#     export CC=/usr/bin/mpicc && \
+#     export LDFLAGS="-lrados -lz" && \
+#     ./configure --prefix=/usr \
+#                 --enable-parallel \
+#                 --enable-threadsafe \
+#                 --enable-unsupported \
+#                 --enable-build-mode=debug \
+#                 --with-zlib && \
+#           make && \
+#           make install && \
+#           cd /tmp && rm -rf /tmp/src
+
+# RUN \
+#     cd /tmp/src && \
+#     ./autogen.sh && \
+#     export CC=/usr/bin/mpicc && \
+#     export LDFLAGS="-lrados -lpthread -lz" && \
+#     ./configure --prefix=/usr \
+#                 --enable-parallel \
+#                 --with-pthread \
+#                 --enable-shared \
+#                 --enable-build-mode=debug \
+#                 --with-zlib && \
+#           make && \
+#           make install && \
+#           cd /tmp && rm -rf /tmp/src
+
+# Create ssh user(openmpi) and setup ssh key dir
+# - ssh identity file and authorized key file is expected to
+#   be mounted at /ssh-keys/$SSH_USER
+RUN addgroup --gid $SSH_GID $SSH_USER
+RUN adduser -q --gecos "" --disabled-password --uid $SSH_UID --gid $SSH_GID $SSH_USER
+RUN mkdir -p /ssh-key/$SSH_USER && chown -R $SSH_USER:$SSH_USER /ssh-key/$SSH_USER
+RUN mkdir -p /.sshd/host_keys && \
+  chown -R $SSH_USER:$SSH_USER /.sshd/host_keys && chmod 700 /.sshd/host_keys
+RUN mkdir -p /.sshd/user_keys/$SSH_USER && \
+  chown -R $SSH_USER:$SSH_USER /.sshd/user_keys/$SSH_USER && chmod 700 /.sshd/user_keys/$SSH_USER
+VOLUME /ssh-key/$SSH_USER
+
+RUN mkdir -p $HOME && chown $SSH_USER:$SSH_USER $HOME && chmod 755 $HOME
+VOLUME $HOME
+
+COPY rootfs /
+
+EXPOSE 2022
+
+# sshd can be run either by root or $SSH_USER
+CMD ["/init.sh"]
+
+# just to test
+CMD mpiexec --allow-run-as-root \
+    --display-map \
+    sh -c 'echo $$(hostname).crocodile:hello'
+
+# vim:set ft=dockerfile:

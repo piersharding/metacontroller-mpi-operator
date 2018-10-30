@@ -1,0 +1,16 @@
+FROM alpine:3.7 AS build
+
+# Install kubectl.
+ARG arg_kubectl_version=v1.10.3
+ENV K8S_VERSION $arg_kubectl_version
+
+RUN apk add --no-cache wget
+RUN echo "version: ${K8S_VERSION}" && \
+    wget -q https://storage.googleapis.com/kubernetes-release/release/${K8S_VERSION}/bin/linux/amd64/kubectl
+RUN chmod +x ./kubectl
+RUN mv ./kubectl /bin/kubectl
+
+FROM alpine:3.7
+COPY --from=build /bin/kubectl /bin/kubectl
+COPY deliver_kubectl.sh .
+ENTRYPOINT ["./deliver_kubectl.sh"]
