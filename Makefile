@@ -87,6 +87,7 @@ fixdns:
 
 clean:
 	kubectl delete -f mpi-test.yaml -n $(KUBE_NAMESPACE) || true
+	sleep 3
 	kubectl delete pods -l app=mpi-controller || true
 	KUBECTL_IMAGE=$(KUBECTL_IMAGE) \
 	 envsubst < deploy/mpi-controller.yaml | kubectl delete -n metacontroller -f - || true
