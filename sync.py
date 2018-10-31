@@ -459,87 +459,46 @@ class Controller(BaseHTTPRequestHandler):
   def sync(self, job, children):
     logging.debug("Job in: " + repr(job))
     logging.debug("Children in: " + repr(children))
-    # Arrange observed Pods by index, and count by phase.
-    # observed_pods = {}
-    # for pod_name, pod in children['Pod.v1'].items():
-    #   pod_index = get_index(job['metadata']['name'], pod_name)
-    #   if pod_index >= 0:
-    #     phase = pod.get('status', {}).get('phase')
-    #     if phase == 'Succeeded':
-    #       succeeded += 1
-    #     elif phase == 'Failed':
-    #       failed += 1
-    #     else:
-    #       active += 1
-    #     observed_pods[pod_index] = pod
 
     configname = False
     for mpiconfig_name, mpiconfig in children['ConfigMap.v1'].items():
       configname = mpiconfig_name
 
     jobname = False
+    job_state = ''
+    job_status = ''
+    job_succeeded = ''
     for mpijob_name, mpijob in children['Job.batch/v1'].items():
       jobname = mpijob_name
+      if mpijob.get('status', {}).get('active', 0) == 1:
+          job_state = 'Running'
+          job_succeeded = 'Unknown'
+          job_status = 'Unknown'
+      for condition in mpijob.get('status', {}).get('conditions', []):
+        if (condition['type'] == 'Complete' or condition['type'] == 'Failed') and condition['status'] == 'True':
+          job_state = 'Finished'
+          job_succeeded = ("succeeded" if mpijob.get('status', {}).get('succeeded', 0) == 1 else "Failed")
+        else:
+          job_state = 'Running'
+          job_succeeded = 'Unknown'
+        job_status = condition['type']
 
     desired_status = {
-      'collisionCount': 0,
       'currentReplicas': 0, 
-      'observedGeneration': 0, 
       'readyReplicas': 0, 
-      'replicas': 0
+      'replicas': 0,
+      'job': {}
       }
 
     name = False
     worker_suffix = "-worker"
-    desired_status = {'collisionCount': 0, 'currentReplicas': 0, 'observedGeneration': 0, 'readyReplicas': 0, 'replicas': 0}
     for mpiset_name, mpiset in children['StatefulSet.apps/v1'].items():
       if mpiset_name.endswith(worker_suffix):
         name = mpiset_name[:-len(worker_suffix)]
-      if 'status' in mpiset:
-        desired_status = {
-          'collisionCount': ( mpiset['status']['collisionCount'] if 'collisionCount' in mpiset['status'] else 0),
-          'currentReplicas': ( mpiset['status']['currentReplicas'] if 'currentReplicas' in mpiset['status'] else 0),
-          'observedGeneration': ( mpiset['status']['observedGeneration'] if 'observedGeneration' in mpiset['status'] else 0),
-          'readyReplicas': ( mpiset['status']['readyReplicas'] if 'readyReplicas' in mpiset['status'] else 0),
-          'replicas': ( mpiset['status']['replicas'] if 'replicas' in mpiset['status'] else 0)
-          }
-
-    # If the job already finished (either completed or failed) at some point,
-    # stop actively managing Pods since they might get deleted by Pod GC.
-    # Just generate a desired state for any observed Pods and return status.
-    # if is_job_finished(job):
-    #   return {
-    #     'status': job['status'],
-    #     'children': [new_pod(job, i) for i, pod in observed_pods.items()]
-    #   }
-
-    # Compute status based on what we observed, before building desired state.
-    # (active, succeeded, failed) = (0, 0, 0)
-    # # spec_completions = job['spec'].get('completions', 1)
-    # desired_status = {'active': active, 'succeeded': succeeded, 'failed': failed}
-    # desired_status['conditions'] = [{'type': 'Complete', 'status': str(succeeded == spec_completions)}]
-
-    # # Generate desired state for existing Pods.
-    # desired_pods = {}
-    # for pod_index, pod in observed_pods.items():
-    #   desired_pods[pod_index] = new_pod(job, pod_index)
-
-    # # Create more Pods as needed.
-    # spec_parallelism = job['spec'].get('parallelism', 1)
-    # for pod_index in range(spec_completions):
-    #   if pod_index not in desired_pods and active < spec_parallelism:
-    #     desired_pods[pod_index] = new_pod(job, pod_index)
-    #     active += 1
-
-    # status:
-    #   collisionCount: 0
-    #   currentReplicas: 4
-    #   currentRevision: mpioperator-test1-worker-6db58bd945
-    #   observedGeneration: 1
-    #   readyReplicas: 3
-    #   replicas: 4
-    #   updateRevision: mpioperator-test1-worker-6db58bd945
-
+      desired_status['currentReplicas'] = mpiset.get('status', {}).get('currentReplicas')
+      desired_status['readyReplicas'] = mpiset.get('status', {}).get('readyReplicas')
+      desired_status['replicas'] = mpiset.get('status', {}).get('replicas')
+    desired_status['job'] = {'state': job_state, 'status': job_status, 'success': job_succeeded}
 
     mpiset = new_mpiset(job, name)
     mpiconfig = new_configmap(job, name, configname)
@@ -547,11 +506,6 @@ class Controller(BaseHTTPRequestHandler):
     mpirole = new_mpirole(job, name, jobname)
     mpirolebinding = new_mpirolebinding(job, name, jobname)
     mpijob = new_mpilauncher(job, name, configname, jobname)
-    # desired_status = {
-    #     'replicas': mpiset['spec']['replicas'],
-    #     'currentReplicas': mpiset['spec']['replicas'],
-    #     'readyReplicas': mpiset['spec']['replicas']
-    #   }
 
     return {'status': desired_status, 'children': [mpiserviceaccount,
                                                    mpirole, 
