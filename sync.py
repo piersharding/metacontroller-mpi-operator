@@ -410,7 +410,26 @@ def new_mpilauncher(job, name, configname, jobname):  # pylint: too-many-locals
                          'terminationMessagePolicy': 'File',
                          'volumeMounts': [{'mountPath': '/opt/kube',
                                            'name': 'mpi-job-kubectl'}]
-                         }],
+                         },
+                        # Need to check all of cluster is Running
+                        {'name': 'check-cluster-up',
+                         'env': [
+                             {'name': 'TARGET_DIR',
+                              'value': '/opt/kube'}],
+                         'image': 'busybox:latest',
+                         'imagePullPolicy': 'Always',
+                         'command': ['sh', '-e', '-c',
+                                     'for i in `cat /etc/mpi/hostfile | \
+                                      cut -f1 -d" "`; do echo $i; \
+                                      /opt/kube/kubectl get pod $i -o yaml | \
+                                      grep phase: | grep Running; done'],
+                         'volumeMounts': [{'mountPath': '/opt/kube',
+                                           'name': 'mpi-job-kubectl'},
+                                          {'mountPath': '/etc/mpi',
+                                           'name': 'mpi-job-config'}],
+                         'resources': {},
+                         'terminationMessagePath': '/dev/termination-log',
+                         'terminationMessagePolicy': 'File'}],
                     'restartPolicy': 'Never',
                     'schedulerName': 'default-scheduler',
                     'securityContext': {},

@@ -5,6 +5,7 @@ CI_REGISTRY ?= gitlab.catalyst.net.nz:4567
 CI_REPOSITORY ?= piers/k8s-hack
 KUBECTL_IMAGE ?= kubectl-delivery:latest
 MPIBASE_IMAGE ?= 
+REPLICAS ?= 2
 
 # Args for Base Image
 UBUNTU_REPOSITORY ?= ubuntu
@@ -21,7 +22,7 @@ WITH_OPENMPI_BUILD ?= false
 KUBECTL_IMAGE ?= kubectl-delivery:latest
 MPIBASE_IMAGE ?= mpibase:latest
 
-# define overides for above variables in here
+# define overrides for above variables in here
 -include PrivateRules.mak
 
 .DEFAULT: deploy
@@ -70,10 +71,19 @@ deploy: namespace
 
 test: regisry-creds
 	MPIBASE_IMAGE=$(MPIBASE_IMAGE) \
+	REPLICAS=$(REPLICAS) \
 	 envsubst < mpi-test.yaml | kubectl apply -f - -n $(KUBE_NAMESPACE)
 
+test-results:
+	kubectl get pods -l job-name=mpioperator-test-mpi-launcher
+	kubectl get pods -l job-name=mpioperator-test-mpi-launcher | \
+	grep Completed | cut -f1 -d" " | xargs kubectl logs || true
+
+test-clean:
+	kubectl delete -f mpi-test.yaml -n $(KUBE_NAMESPACE) || true
+
 regisry-creds: namespace
-	kubectl create secret -n $(KUBE_NAMESPACE) \
+	@kubectl create secret -n $(KUBE_NAMESPACE) \
 	  docker-registry $(PULL_SECRET) \
 	 --docker-server=$(CI_REGISTRY) \
 	 --docker-username=$(GITLAB_USER) \

@@ -3,7 +3,7 @@ kind: MPIJob
 metadata:
   name: test-mpi
 spec:
-  replicas: 2
+  replicas: ${REPLICAS}
   template:
     metadata:
       labels:
@@ -16,7 +16,7 @@ spec:
         args: [ '--allow-run-as-root',
                 '--display-map',
                 'sh', '-c', 'echo dragon.crocodile:hello'] 
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         volumeMounts:
           - mountPath: /mnt
             name: mount-data
