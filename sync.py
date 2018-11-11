@@ -19,6 +19,8 @@ KUBECTL_IMAGE = 'mpioperator/kubectl-delivery:latest'
 if len(sys.argv) > 1:
     KUBECTL_IMAGE = sys.argv[1]
 
+MPI_BASE_IMAGE = 'mpibase:latest'
+
 
 def deep_merge_lists(original, incoming, alwaysadd=False):
     """
@@ -105,7 +107,7 @@ def new_mpiset(job, name):
     if not name:
         name = build_name(job)
     replicas = int(job['spec']['replicas'] if 'replicas' in job['spec'] else 1)
-    image = 'gitlab.catalyst.net.nz:4567/piers/k8s-hack/kube-grid:opr'
+    image = MPI_BASE_IMAGE
     if 'image' in job['spec']:
         image = job['spec']['image']
 
@@ -138,13 +140,13 @@ def new_mpiset(job, name):
                 },
                 'spec': {
                     'containers': [
-                        {'args': ['365d'],
+                        {'args': ['infinity'],
                          'command': ['sleep'],
                          'image': image,
                          'imagePullPolicy': 'IfNotPresent',
                          'name': 'mpiexecutor',
                          'resources': {
-                             'limits': {'nvidia.com/gpu': "0"}
+                             # 'limits': {'nvidia.com/gpu': "0"}
                          },
                          'terminationMessagePath': '/dev/termination-log',
                          'terminationMessagePolicy': 'File',
@@ -350,7 +352,7 @@ def new_mpilauncher(job, name, configname, jobname):  # pylint: too-many-locals
         configname = configmap_name(job)
     if not jobname:
         jobname = jobname_name(job)
-    image = 'gitlab.catalyst.net.nz:4567/piers/k8s-hack/kube-grid:opr'
+    image = MPI_BASE_IMAGE
     if 'image' in job['spec']:
         image = job['spec']['image']
 
@@ -417,7 +419,7 @@ def new_mpilauncher(job, name, configname, jobname):  # pylint: too-many-locals
                              {'name': 'TARGET_DIR',
                               'value': '/opt/kube'}],
                          'image': 'busybox:latest',
-                         'imagePullPolicy': 'Always',
+                         'imagePullPolicy': 'IfNotPresent',
                          'command': ['sh', '-e', '-c',
                                      'for i in `cat /etc/mpi/hostfile | \
                                       cut -f1 -d" "`; do echo $i; \

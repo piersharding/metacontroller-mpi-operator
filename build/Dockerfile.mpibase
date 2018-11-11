@@ -8,13 +8,8 @@ RUN \
 
 MAINTAINER Piers Harding "piers@catalyst.net.nz"
 
-ARG SSH_USER=openmpi
-ENV SSH_USER=$SSH_USER
-ARG SSH_UID=1000
-ARG SSH_GID=1000
 ARG OPENMPI_VERSION
 ARG WITH_OPENMPI_BUILD="false"
-ARG HOME=/home/$SSH_USER
 
 ENV LANG en_NZ.UTF-8
 ENV LANGUAGE en_NZ.UTF-8
@@ -31,14 +26,18 @@ RUN apt-get update && \
 
 RUN \
     apt-get update -y && \
-    apt-get install -y locales tzdata net-tools dnsutils telnet iproute2 \
-            iperf3 fio vim-tiny bash-completion software-properties-common \
+    apt-get install -y locales tzdata dnsutils \
+            software-properties-common \
             build-essential curl wget fonts-liberation ca-certificates && \
     echo "Setting locales  ..." && /usr/sbin/locale-gen en_US.UTF-8 && \
     /usr/sbin/locale-gen en_NZ.UTF-8 && \
     echo "Setting timezone ..." &&  /bin/echo 'Pacific/Auckland' | tee /etc/timezone && DEBIAN_FRONTEND=noninteractive dpkg-reconfigure --frontend noninteractive tzdata
 
     # apt-get install -y git make gcc libhdf5-dev libfftw3-dev libopenmpi-dev
+
+COPY ./gstack.sh /usr/bin/gstack.sh
+COPY ./gstack.sh /usr/bin/gstack
+RUN chmod a+x /usr/bin/gstack.sh /usr/bin/gstack
 
 RUN \
     apt-get update -y && \
@@ -50,10 +49,6 @@ RUN \
                        gdb  ${arg_openmpi_pkg} && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
-
-COPY ./gstack.sh /usr/bin/gstack.sh
-COPY ./gstack.sh /usr/bin/gstack
-RUN chmod a+x /usr/bin/gstack.sh /usr/bin/gstack
 
 #
 # install openmpi
@@ -192,31 +187,6 @@ RUN \
 #           make install && \
 #           cd /tmp && rm -rf /tmp/src
 
-# Create ssh user(openmpi) and setup ssh key dir
-# - ssh identity file and authorized key file is expected to
-#   be mounted at /ssh-keys/$SSH_USER
-RUN addgroup --gid $SSH_GID $SSH_USER
-RUN adduser -q --gecos "" --disabled-password --uid $SSH_UID --gid $SSH_GID $SSH_USER
-RUN mkdir -p /ssh-key/$SSH_USER && chown -R $SSH_USER:$SSH_USER /ssh-key/$SSH_USER
-RUN mkdir -p /.sshd/host_keys && \
-  chown -R $SSH_USER:$SSH_USER /.sshd/host_keys && chmod 700 /.sshd/host_keys
-RUN mkdir -p /.sshd/user_keys/$SSH_USER && \
-  chown -R $SSH_USER:$SSH_USER /.sshd/user_keys/$SSH_USER && chmod 700 /.sshd/user_keys/$SSH_USER
-VOLUME /ssh-key/$SSH_USER
-
-RUN mkdir -p $HOME && chown $SSH_USER:$SSH_USER $HOME && chmod 755 $HOME
-VOLUME $HOME
-
 COPY rootfs /
-
-EXPOSE 2022
-
-# sshd can be run either by root or $SSH_USER
-CMD ["/init.sh"]
-
-# just to test
-CMD mpiexec --allow-run-as-root \
-    --display-map \
-    sh -c 'echo $$(hostname).crocodile:hello'
 
 # vim:set ft=dockerfile:
