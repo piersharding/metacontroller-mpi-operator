@@ -107,6 +107,10 @@ def new_mpiset(job, name):
     if not name:
         name = build_name(job)
     replicas = int(job['spec']['replicas'] if 'replicas' in job['spec'] else 1)
+    # daemonset = job['spec']['daemonset'] \
+    #     if 'daemonset' in job['spec'] else False
+    # kind = 'DaemonSet' if daemonset else 'StatefulSet'
+
     image = MPI_BASE_IMAGE
     if 'image' in job['spec']:
         image = job['spec']['image']
@@ -117,18 +121,20 @@ def new_mpiset(job, name):
         'metadata': {
             'labels': {'group_name': 'skatelescope.org',
                        'mpi_job_name': name,
-                       'mpi_role_type': 'worker'},
+                       'mpi_role_type': 'worker',
+                       'mpi_job_role': '%s-worker' % name},
             'name': '%s-worker' % name
             },
         'spec': {
-            'podManagementPolicy': 'Parallel',
             'replicas': replicas,
+            'podManagementPolicy': 'Parallel',
             'revisionHistoryLimit': 10,
             'selector': {
                 'matchLabels': {
                     'group_name': 'skatelescope.org',
                     'mpi_job_name': name,
-                    'mpi_role_type': 'worker'}
+                    'mpi_role_type': 'worker',
+                    'mpi_job_role': '%s-worker' % name}
                 },
             'serviceName': '%s-worker' % name,
             'template': {
@@ -136,7 +142,8 @@ def new_mpiset(job, name):
                     'labels': {
                         'group_name': 'skatelescope.org',
                         'mpi_job_name': name,
-                        'mpi_role_type': 'worker'}
+                        'mpi_role_type': 'worker',
+                        'mpi_job_role': '%s-worker' % name}
                 },
                 'spec': {
                     'containers': [
@@ -179,6 +186,18 @@ def new_mpiset(job, name):
             'type': 'RollingUpdate'
         }
     }
+    # if not daemonset:
+    #     mpiset['spec']['replicas'] = replicas
+    if 'daemon' in job['spec'] and job['spec']['daemon']:
+        mpiset['spec']['template']['spec']['affinity'] = {'podAntiAffinity': {
+            'requiredDuringSchedulingIgnoredDuringExecution': [
+                {'labelSelector': {
+                    'matchExpressions': [
+                        {'key': 'mpi_job_role',
+                         'operator': 'In',
+                         'values': ['%s-worker' % name]}]},
+                 'topologyKey': 'kubernetes.io/hostname'}]}}
+
     template = copy.deepcopy(job['spec']['template'])
 
     # must remove overriding command and args or we will have trouble
@@ -316,7 +335,8 @@ def new_configmap(job, name, configname):
 
     configmap = {
         'apiVersion': 'v1',
-        'data': {'hostfile': hostfile,
+        # 'data': {'hostfile': hostfile,
+        'data': {'proposedhosts': hostfile,
                  'kubexec.sh':
                  "#!/bin/sh\n" +
                  "set -x\n" +
@@ -386,7 +406,8 @@ def new_mpilauncher(job, name, configname, jobname):  # pylint: too-many-locals
                             {'name': 'OMPI_MCA_plm_rsh_agent',
                              'value': '/etc/mpi/kubexec.sh'},
                             {'name': 'OMPI_MCA_orte_default_hostfile',
-                             'value': '/etc/mpi/hostfile'}],
+                             # 'value': '/etc/mpi/hostfile'}],
+                             'value': '/etc/mpihosts/hostfile'}],
                          'image': image,
                          'imagePullPolicy': 'IfNotPresent',
                          'name': 'test1',
@@ -395,6 +416,8 @@ def new_mpilauncher(job, name, configname, jobname):  # pylint: too-many-locals
                          'terminationMessagePolicy': 'File',
                          'volumeMounts': [{'mountPath': '/opt/kube',
                                            'name': 'mpi-job-kubectl'},
+                                          {'mountPath': '/etc/mpihosts',
+                                           'name': 'mpi-job-hosts'},
                                           {'mountPath': '/etc/mpi',
                                            'name': 'mpi-job-config'}]
                          }
@@ -421,12 +444,38 @@ def new_mpilauncher(job, name, configname, jobname):  # pylint: too-many-locals
                          'image': 'busybox:latest',
                          'imagePullPolicy': 'IfNotPresent',
                          'command': ['sh', '-e', '-c',
-                                     'for i in `cat /etc/mpi/hostfile | \
+                                     'cat /etc/mpi/proposedhosts; \
+                                      for i in `cat /etc/mpi/proposedhosts | \
                                       cut -f1 -d" "`; do echo $i; \
                                       /opt/kube/kubectl get pod $i -o yaml | \
-                                      grep phase: | grep Running; done'],
+                                      grep phase: | \
+                                      grep -E "Running|Pending"; \
+                                      done'],
                          'volumeMounts': [{'mountPath': '/opt/kube',
                                            'name': 'mpi-job-kubectl'},
+                                          {'mountPath': '/etc/mpi',
+                                           'name': 'mpi-job-config'}]
+                         },
+                        # Need to check all of cluster is Running
+                        {'name': 'filter-cluster-running',
+                         'env': [
+                             {'name': 'TARGET_DIR',
+                              'value': '/opt/kube'}],
+                         'image': 'busybox:latest',
+                         'imagePullPolicy': 'IfNotPresent',
+                         'command': ['sh', '-e', '-c',
+                                     'for i in `cat /etc/mpi/proposedhosts | \
+                                      cut -f1 -d" "`; do echo $i; \
+                                      /opt/kube/kubectl get pod $i \
+                                      -o template \
+                                      --template={{.status.phase}} | \
+                                      grep Running 1>/dev/null && grep $i \
+                                      /etc/mpi/proposedhosts >> \
+                                      /etc/mpihosts/hostfile; done; exit 0'],
+                         'volumeMounts': [{'mountPath': '/opt/kube',
+                                           'name': 'mpi-job-kubectl'},
+                                          {'mountPath': '/etc/mpihosts',
+                                           'name': 'mpi-job-hosts'},
                                           {'mountPath': '/etc/mpi',
                                            'name': 'mpi-job-config'}],
                          'resources': {},
@@ -441,15 +490,18 @@ def new_mpilauncher(job, name, configname, jobname):  # pylint: too-many-locals
                     'volumes': [
                         {'emptyDir': {},
                          'name': 'mpi-job-kubectl'},
+                        {'emptyDir': {},
+                         'name': 'mpi-job-hosts'},
                         {'configMap': {
                             'defaultMode': 420,
                             'items': [
                                 {'key': 'kubexec.sh',
                                  'mode': 365,
                                  'path': 'kubexec.sh'},
-                                {'key': 'hostfile',
+                                {'key': 'proposedhosts',
                                  'mode': 292,
-                                 'path': 'hostfile'}],
+                                 # 'path': 'hostfile'}],
+                                 'path': 'proposedhosts'}],
                             'name': configname},
                          'name': 'mpi-job-config'}]
                     }
@@ -466,6 +518,46 @@ def new_mpilauncher(job, name, configname, jobname):  # pylint: too-many-locals
     return mpijob
 
 
+def parse_config(children):
+    """
+    See if we have a configured/named config
+    """
+    configname = False
+    for mpiconfig_name, _ in children['ConfigMap.v1'].items():
+        configname = mpiconfig_name
+    return configname
+
+
+def parse_job(children):
+    """
+    parse status information out of the Job element
+    """
+    job_status = {'name': False,
+                  'state': "",
+                  'status': "",
+                  'succeeded': ""}
+    for mpijob_name, mpijob in children['Job.batch/v1'].items():
+        job_status['name'] = mpijob_name
+        if mpijob.get('status', {}).get('active', 0) == 1:
+            job_status['state'] = 'Running'
+            job_status['succeeded'] = 'Unknown'
+            job_status['status'] = 'Unknown'
+        for condition in mpijob.get('status', {}).get('conditions', []):
+            if (condition['type'] == 'Complete' or
+                    condition['type'] == 'Failed') and \
+               condition['status'] == 'True':
+                job_status['state'] = 'Finished'
+                job_status['succeeded'] = \
+                    ("succeeded" if
+                     mpijob.get('status', {}).get('succeeded', 0) == 1
+                     else "Failed")
+            else:
+                job_status['state'] = 'Running'
+                job_status['succeeded'] = 'Unknown'
+            job_status['status'] = condition['type']
+    return job_status
+
+
 class Controller(BaseHTTPRequestHandler):
     """
     Basic HHTP controller - handles only POST requests
@@ -478,33 +570,8 @@ class Controller(BaseHTTPRequestHandler):
         logging.debug("Job in: %s", repr(job))
         logging.debug("Children in: %s", repr(children))
 
-        configname = False
-        for mpiconfig_name, _ in children['ConfigMap.v1'].items():
-            configname = mpiconfig_name
-
-        job_status = {'name': False,
-                      'state': "",
-                      'status': "",
-                      'succeeded': ""}
-        for mpijob_name, mpijob in children['Job.batch/v1'].items():
-            job_status['name'] = mpijob_name
-            if mpijob.get('status', {}).get('active', 0) == 1:
-                job_status['state'] = 'Running'
-                job_status['succeeded'] = 'Unknown'
-                job_status['status'] = 'Unknown'
-            for condition in mpijob.get('status', {}).get('conditions', []):
-                if (condition['type'] == 'Complete' or
-                        condition['type'] == 'Failed') and \
-                   condition['status'] == 'True':
-                    job_status['state'] = 'Finished'
-                    job_status['succeeded'] = \
-                        ("succeeded" if
-                         mpijob.get('status', {}).get('succeeded', 0) == 1
-                         else "Failed")
-                else:
-                    job_status['state'] = 'Running'
-                    job_status['succeeded'] = 'Unknown'
-                job_status['status'] = condition['type']
+        configname = parse_config(children)
+        job_status = parse_job(children)
 
         desired_status = {
             'currentReplicas': 0,
@@ -513,7 +580,12 @@ class Controller(BaseHTTPRequestHandler):
             'job': {}
             }
 
+        # check if daemonset
         name = False
+        # kind = 'DaemonSet.apps/v1' \
+        #     if 'daemonset' in job['spec'] and \
+        #     job['spec']['daemonset'] else 'StatefulSet.apps/v1'
+
         for mpiset_name, mpiset in children['StatefulSet.apps/v1'].items():
             if mpiset_name.endswith(WORKER_SUFFIX):
                 name = mpiset_name[:-len(WORKER_SUFFIX)]

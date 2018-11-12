@@ -68,6 +68,14 @@ test:
 	REPLICAS=$(REPLICAS) \
 	 envsubst < mpi-test-replicas.yaml | kubectl apply -f - -n $(KUBE_NAMESPACE)
 
+test-daemons:
+	MPIBASE_IMAGE=$(MPIBASE_IMAGE) \
+	REPLICAS=$(REPLICAS) \
+	 envsubst < mpi-test-daemons.yaml | kubectl apply -f - -n $(KUBE_NAMESPACE)
+
+logs:
+	kubectl logs -l app=mpi-controller -n metacontroller
+
 test-results:
 	kubectl get pods -l job-name=mpioperator-test-mpi-launcher
 	kubectl get pods -l job-name=mpioperator-test-mpi-launcher | \
@@ -91,7 +99,7 @@ fixdns:
 
 clean:
 	kubectl delete -f mpi-test-replicas.yaml -n $(KUBE_NAMESPACE) || true
-	sleep 3
+	sleep 1
 	kubectl delete pods -l app=mpi-controller || true
 	KUBECTL_IMAGE=$(KUBECTL_IMAGE) \
 	 envsubst < deploy/mpi-controller.yaml | kubectl delete -n metacontroller -f - || true

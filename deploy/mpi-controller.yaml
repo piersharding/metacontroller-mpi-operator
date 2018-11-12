@@ -24,15 +24,18 @@ spec:
         spec:
           title: The MPIJob spec
           description: replicas should be specified
-          oneOf:
-          - properties:
-              replicas:
-                title: Total number of replicas
-                description: Required replicas for the MPI cluster
-                type: integer
-                minimum: 1
-            required:
-            - replicas
+          properties:
+            replicas:
+              title: Total number of replicas
+              description: Required replicas for the MPI cluster
+              type: integer
+              minimum: 1
+            daemon:
+              title: Daemon, strictly one per node
+              description: Force MPI cluster to launch one per node
+              type: boolean
+          required:
+          - replicas
 
 ---
 apiVersion: metacontroller.k8s.io/v1alpha1
@@ -55,6 +58,8 @@ spec:
       resource: rolebindings
     - apiVersion: apps/v1
       resource: statefulsets
+    # - apiVersion: apps/v1
+    #   resource: daemonsets
     - apiVersion: batch/v1
       resource: jobs
   hooks:

@@ -1,0 +1,31 @@
+apiVersion: skatelescope.org/v1
+kind: MPIJob
+metadata:
+  name: test-mpi
+spec:
+  replicas: ${REPLICAS}
+  daemon: true
+  template:
+    metadata:
+      labels:
+        mpi-app: do-the-thing
+    spec:
+      containers:
+      - name: test-mpi
+        image: ${MPIBASE_IMAGE}
+        command: ["mpiexec"]
+        args: [ '--allow-run-as-root',
+                '--display-map',
+                'sh', '-c', 'echo dragon.crocodile:hello'] 
+        imagePullPolicy: Always
+        volumeMounts:
+          - mountPath: /mnt
+            name: mount-data
+            readOnly: true
+      imagePullSecrets:
+        - name: gitlab-registry
+      volumes:
+      - name: mount-data
+        hostPath:
+          path: /etc
+          type: Directory
