@@ -469,9 +469,11 @@ def new_mpilauncher(job, name, configname, jobname):  # pylint: too-many-locals
                                       /opt/kube/kubectl get pod $i \
                                       -o template \
                                       --template={{.status.phase}} | \
-                                      grep Running 1>/dev/null && grep $i \
-                                      /etc/mpi/proposedhosts >> \
-                                      /etc/mpihosts/hostfile; done; exit 0'],
+                                      grep Running 1>/dev/null && \
+                                      echo "$i slots=1" >> \
+                                      /etc/mpihosts/hostfile; done; \
+                                      echo "hostfile is:"; \
+                                      cat /etc/mpihosts/hostfile; exit 0'],
                          'volumeMounts': [{'mountPath': '/opt/kube',
                                            'name': 'mpi-job-kubectl'},
                                           {'mountPath': '/etc/mpihosts',
