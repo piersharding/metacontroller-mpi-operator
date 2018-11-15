@@ -107,9 +107,6 @@ def new_mpiset(job, name):
     if not name:
         name = build_name(job)
     replicas = int(job['spec']['replicas'] if 'replicas' in job['spec'] else 1)
-    # daemonset = job['spec']['daemonset'] \
-    #     if 'daemonset' in job['spec'] else False
-    # kind = 'DaemonSet' if daemonset else 'StatefulSet'
 
     image = MPI_BASE_IMAGE
     if 'image' in job['spec']:
@@ -186,8 +183,6 @@ def new_mpiset(job, name):
             'type': 'RollingUpdate'
         }
     }
-    # if not daemonset:
-    #     mpiset['spec']['replicas'] = replicas
     if 'daemon' in job['spec'] and job['spec']['daemon']:
         mpiset['spec']['template']['spec']['affinity'] = {'podAntiAffinity': {
             'requiredDuringSchedulingIgnoredDuringExecution': [
@@ -333,16 +328,49 @@ def new_configmap(job, name, configname):
     hostfile = "\n".join(["%s-worker-%d slots=1" % (name, i)
                           for i in range(replicas)])
 
+    daemon = True if 'daemon' in job['spec'] and \
+        job['spec']['daemon'] else False
+
     configmap = {
         'apiVersion': 'v1',
-        # 'data': {'hostfile': hostfile,
         'data': {'proposedhosts': hostfile,
                  'kubexec.sh':
                  "#!/bin/sh\n" +
                  "set -x\n" +
                  "POD_NAME=$1\n" +
                  "shift\n" +
-                 "/opt/kube/kubectl exec ${POD_NAME} -- /bin/sh -c \"$*\"\n"},
+                 "/opt/kube/kubectl exec ${POD_NAME} -- /bin/sh -c \"$*\"\n",
+                 'check_hosts.sh':
+                 "#!/bin/sh\n" +
+                 "set -e\n" +
+                 "set -x\n" +
+                 "rm -f /etc/mpihosts/hostfile\n" +
+                 "echo \"proposedhosts is:\" \n" +
+                 "cat /etc/mpi/proposedhosts \n" +
+                 "for i in `cat /etc/mpi/proposedhosts | \\\n" +
+                 "cut -f1 -d\" \"` \n" +
+                 "do\n" +
+                 "  echo \"Processing: $i\" \n" +
+                 "  STATUS=`/opt/kube/kubectl get pod $i " +
+                 " -o template --template={{.status.phase}}`\n" +
+                 "  echo \"Status is: ${STATUS}\"\n"
+                 "  if [ \"${STATUS}\" != \"Running\" ] && " +
+                 "  [ \"${STATUS}\" != \"Pending\" ]; then\n" +
+                 "    echo \"Bad status - exiting\"\n" +
+                 "    exit 1\n" +
+                 "  else\n" +
+                 "    if [ \"${STATUS}\" = \"Running\" ]; then\n" +
+                 "      echo \"$i slots=1\" >> /etc/mpihosts/hostfile \n" +
+                 "    else\n" +
+                 ("      echo \"StatfulSet - must be running - aborting\" \n" +
+                  "      exit 1\n" if not daemon else
+                  "      echo \"DaemonSet - Ignoring: $i - ${STATUS}\" \n") +
+                 "    fi\n" +
+                 "  fi\n" +
+                 "done\n" +
+                 "echo \"prepared hostfile is:\" \n" +
+                 "cat /etc/mpihosts/hostfile\n" +
+                 "exit 0\n"},
         'kind': 'ConfigMap',
         'metadata': {
             'name': configname
@@ -406,7 +434,6 @@ def new_mpilauncher(job, name, configname, jobname):  # pylint: too-many-locals
                             {'name': 'OMPI_MCA_plm_rsh_agent',
                              'value': '/etc/mpi/kubexec.sh'},
                             {'name': 'OMPI_MCA_orte_default_hostfile',
-                             # 'value': '/etc/mpi/hostfile'}],
                              'value': '/etc/mpihosts/hostfile'}],
                          'image': image,
                          'imagePullPolicy': 'IfNotPresent',
@@ -436,44 +463,15 @@ def new_mpilauncher(job, name, configname, jobname):  # pylint: too-many-locals
                          'volumeMounts': [{'mountPath': '/opt/kube',
                                            'name': 'mpi-job-kubectl'}]
                          },
-                        # Need to check all of cluster is Running
-                        {'name': 'check-cluster-up',
+                        # Need to check state of cluster
+                        {'name': 'check-and-filter-cluster-pods',
                          'env': [
                              {'name': 'TARGET_DIR',
                               'value': '/opt/kube'}],
                          'image': 'busybox:latest',
                          'imagePullPolicy': 'IfNotPresent',
                          'command': ['sh', '-e', '-c',
-                                     'cat /etc/mpi/proposedhosts; \
-                                      for i in `cat /etc/mpi/proposedhosts | \
-                                      cut -f1 -d" "`; do echo $i; \
-                                      /opt/kube/kubectl get pod $i -o yaml | \
-                                      grep phase: | \
-                                      grep -E "Running|Pending"; \
-                                      done'],
-                         'volumeMounts': [{'mountPath': '/opt/kube',
-                                           'name': 'mpi-job-kubectl'},
-                                          {'mountPath': '/etc/mpi',
-                                           'name': 'mpi-job-config'}]
-                         },
-                        # Need to check all of cluster is Running
-                        {'name': 'filter-cluster-running',
-                         'env': [
-                             {'name': 'TARGET_DIR',
-                              'value': '/opt/kube'}],
-                         'image': 'busybox:latest',
-                         'imagePullPolicy': 'IfNotPresent',
-                         'command': ['sh', '-e', '-c',
-                                     'for i in `cat /etc/mpi/proposedhosts | \
-                                      cut -f1 -d" "`; do echo $i; \
-                                      /opt/kube/kubectl get pod $i \
-                                      -o template \
-                                      --template={{.status.phase}} | \
-                                      grep Running 1>/dev/null && \
-                                      echo "$i slots=1" >> \
-                                      /etc/mpihosts/hostfile; done; \
-                                      echo "hostfile is:"; \
-                                      cat /etc/mpihosts/hostfile; exit 0'],
+                                     '/etc/mpi/check_hosts.sh'],
                          'volumeMounts': [{'mountPath': '/opt/kube',
                                            'name': 'mpi-job-kubectl'},
                                           {'mountPath': '/etc/mpihosts',
@@ -500,6 +498,9 @@ def new_mpilauncher(job, name, configname, jobname):  # pylint: too-many-locals
                                 {'key': 'kubexec.sh',
                                  'mode': 365,
                                  'path': 'kubexec.sh'},
+                                {'key': 'check_hosts.sh',
+                                 'mode': 365,
+                                 'path': 'check_hosts.sh'},
                                 {'key': 'proposedhosts',
                                  'mode': 292,
                                  # 'path': 'hostfile'}],
@@ -582,12 +583,7 @@ class Controller(BaseHTTPRequestHandler):
             'job': {}
             }
 
-        # check if daemonset
         name = False
-        # kind = 'DaemonSet.apps/v1' \
-        #     if 'daemonset' in job['spec'] and \
-        #     job['spec']['daemonset'] else 'StatefulSet.apps/v1'
-
         for mpiset_name, mpiset in children['StatefulSet.apps/v1'].items():
             if mpiset_name.endswith(WORKER_SUFFIX):
                 name = mpiset_name[:-len(WORKER_SUFFIX)]
