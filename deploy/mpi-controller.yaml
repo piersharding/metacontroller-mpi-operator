@@ -30,6 +30,11 @@ spec:
               description: Required replicas for the MPI cluster
               type: integer
               minimum: 1
+            slots:
+              title: Number of slots per instance
+              description: Number of slots per instance for the MPI cluster
+              type: integer
+              minimum: 1
             daemon:
               title: Daemon, strictly one per node
               description: Force MPI cluster to launch one per node

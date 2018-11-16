@@ -325,7 +325,8 @@ def new_configmap(job, name, configname):
         configname = configmap_name(job)
 
     replicas = int(job['spec']['replicas'] if 'replicas' in job['spec'] else 1)
-    hostfile = "\n".join(["%s-worker-%d slots=1" % (name, i)
+    slots = int(job['spec']['slots'] if 'slots' in job['spec'] else 1)
+    hostfile = "\n".join(["%s-worker-%d slots=%d" % (name, i, slots)
                           for i in range(replicas)])
 
     daemon = True if 'daemon' in job['spec'] and \
@@ -360,7 +361,8 @@ def new_configmap(job, name, configname):
                  "    exit 1\n" +
                  "  else\n" +
                  "    if [ \"${STATUS}\" = \"Running\" ]; then\n" +
-                 "      echo \"$i slots=1\" >> /etc/mpihosts/hostfile \n" +
+                 "      echo \"$i slots=" + str(slots) +
+                 "\" >> /etc/mpihosts/hostfile \n" +
                  "    else\n" +
                  ("      echo \"StatfulSet - must be running - aborting\" \n" +
                   "      exit 1\n" if not daemon else
