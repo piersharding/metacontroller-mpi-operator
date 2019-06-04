@@ -1,0 +1,14 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mpi-operator-{{ template "mpi-operator.name" . }}-{{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: mpi-operator-{{ template "mpi-operator.name" . }}
+    app.kubernetes.io/instance: "{{ .Release.Name }}"
+    app.kubernetes.io/managed-by: "{{ .Release.Service }}"
+    helm.sh/chart: "{{ template "mpi-operator.chart" . }}"
+data:
+{{ (.Files.Glob "configs/*.py").AsConfig | indent 2  }}
+{{ (tpl (.Files.Glob "configs/*.yaml").AsConfig .) | indent 2  }}

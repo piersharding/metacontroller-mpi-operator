@@ -1,0 +1,86 @@
+{{ if .Values.controller.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # name: mpi-controller
+  # namespace: metacontroller
+  name: mpi-controller-{{ template "mpi-operator.name" . }}-{{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: mpi-controller-{{ template "mpi-operator.name" . }}
+    app.kubernetes.io/instance: "{{ .Release.Name }}"
+    app.kubernetes.io/managed-by: "{{ .Release.Service }}"
+    helm.sh/chart: "{{ template "mpi-operator.chart" . }}"
+spec:
+  selector:
+    app.kubernetes.io/name:  mpi-controller-{{ template "mpi-operator.name" . }}
+    app.kubernetes.io/instance: "{{ .Release.Name }}"
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: http
+
+---
+
+apiVersion: apps/v1beta1
+kind: Deployment
+metadata:
+  name: mpi-controller-{{ template "mpi-operator.name" . }}-{{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  # namespace: metacontroller
+  labels:
+    app.kubernetes.io/name: mpi-controller-{{ template "mpi-operator.name" . }}
+    app.kubernetes.io/instance: "{{ .Release.Name }}"
+    app.kubernetes.io/managed-by: "{{ .Release.Service }}"
+    helm.sh/chart: "{{ template "mpi-operator.chart" . }}"
+
+spec:
+  replicas: {{ .Values.controller.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mpi-controller-{{ template "mpi-operator.name" . }}
+      app.kubernetes.io/instance: "{{ .Release.Name }}"
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mpi-controller-{{ template "mpi-operator.name" . }}
+        app.kubernetes.io/instance: "{{ .Release.Name }}"
+        app.kubernetes.io/managed-by: "{{ .Release.Service }}"
+        helm.sh/chart: "{{ template "mpi-operator.chart" . }}"
+    spec:
+      volumes:
+      - name: hooks
+        configMap:
+          name: mpi-operator-{{ template "mpi-operator.name" . }}-{{ .Release.Name }}
+      containers:
+      - name: controller
+        image: "{{ .Values.controller.image.registry }}/{{ .Values.controller.image.image }}:{{ .Values.controller.image.tag }}"
+        imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+
+        image: python:3-alpine
+        command: ["python3", "/hooks/sync.py", "{{ .Values.controller.kubectl_image }}"]
+        volumeMounts:
+        - name: hooks
+          mountPath: /hooks
+        ports:
+        - name: http
+          containerPort: 80
+        resources:
+{{ toYaml .Values.controller.resources | indent 10 }}
+{{- with .Values.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+{{- end }}
+{{- with .Values.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+{{- end }}
+{{- with .Values.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+{{- end }}
+
+{{ end }}

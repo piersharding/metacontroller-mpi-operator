@@ -1,0 +1,32 @@
+{{ if .Values.controller.enabled }}
+---
+apiVersion: metacontroller.k8s.io/v1alpha1
+kind: CompositeController
+metadata:
+  name: mpi-controller
+spec:
+  generateSelector: true
+  parentResource:
+    apiVersion: skatelescope.org/v1
+    resource: mpijobs
+  childResources:
+    - apiVersion: v1
+      resource: configmaps
+    - apiVersion: v1
+      resource: serviceaccounts
+    - apiVersion: rbac.authorization.k8s.io/v1
+      resource: roles
+    - apiVersion: rbac.authorization.k8s.io/v1
+      resource: rolebindings
+    - apiVersion: apps/v1
+      resource: statefulsets
+    # - apiVersion: apps/v1
+    #   resource: daemonsets
+    - apiVersion: batch/v1
+      resource: jobs
+  hooks:
+    sync:
+      webhook:
+        url: http://mpi-controller-{{ template "mpi-operator.name" . }}-{{ .Release.Name }}.{{ .Release.Namespace }}/sync
+
+{{ end }}

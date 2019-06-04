@@ -1,0 +1,28 @@
+---
+apiVersion: skatelescope.org/v1
+kind: MPIJob
+metadata:
+  name: {{ template "mpi-operator.name" . }}-{{ .Release.Name }}-simple-test
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ template "mpi-operator.name" . }}-{{ .Release.Name }}-simple-test
+    app.kubernetes.io/instance: "{{ .Release.Name }}"
+    app.kubernetes.io/managed-by: "{{ .Release.Service }}"
+    helm.sh/chart: "{{ template "mpi-operator.chart" . }}"
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        mpi-app: {{ template "mpi-operator.name" . }}-{{ .Release.Name }}-simple-test
+    spec:
+      containers:
+      - name: simple-test
+        image: piersharding/mpibase:latest
+        imagePullPolicy: IfNotPresent
+        command: ["mpiexec"]
+        args: [ '--allow-run-as-root',
+                '--display-map',
+                'sh', '-c', 'echo {{ template "mpi-operator.name" . }}-{{ .Release.Name }}:hello']
+        imagePullPolicy: Always
+        restartPolicy: Never

@@ -66,7 +66,7 @@ def deep_merge_dicts(original, incoming):
      d. conflicting types: Value is overridden.
 
     """
-    special = ['volumeMounts', 'volumes']
+    special = ['volumeMounts', 'volumes', 'env']
 
     for key in incoming:
         if key in original:
@@ -77,7 +77,7 @@ def deep_merge_dicts(original, incoming):
             elif (isinstance(original[key], list) and
                   isinstance(incoming[key], list)):
                 deep_merge_lists(original[key], incoming[key],
-                                 (True if key in special else False))
+                                 (key in special))
 
             else:
                 original[key] = incoming[key]
@@ -156,8 +156,7 @@ def new_mpiset(job, name):
                          'terminationMessagePolicy': 'File',
                          'volumeMounts': [
                              {'mountPath': '/etc/mpi',
-                              'name': 'mpi-job-config'}]
-                         }
+                              'name': 'mpi-job-config'}]}
                     ],
                     'dnsPolicy': 'ClusterFirst',
                     'restartPolicy': 'Always',
@@ -271,13 +270,11 @@ def new_mpirole(job, name, jobname):
             {'apiGroups': [""],
              'resourceNames': hostfile,
              'resources': ['pods'],
-             'verbs': ['get']
-             },
+             'verbs': ['get']},
             {'apiGroups': [""],
              'resourceNames': hostfile,
              'resources': ['pods/exec'],
-             'verbs':['create']
-             }
+             'verbs':['create']}
             ]
         }
     return role
@@ -329,8 +326,7 @@ def new_configmap(job, name, configname):
     hostfile = "\n".join(["%s-worker-%d slots=%d" % (name, i, slots)
                           for i in range(replicas)])
 
-    daemon = True if 'daemon' in job['spec'] and \
-        job['spec']['daemon'] else False
+    daemon = 'daemon' in job['spec'] and job['spec']['daemon']
 
     configmap = {
         'apiVersion': 'v1',
@@ -448,23 +444,21 @@ def new_mpilauncher(job, name, configname, jobname):  # pylint: too-many-locals
                                           {'mountPath': '/etc/mpihosts',
                                            'name': 'mpi-job-hosts'},
                                           {'mountPath': '/etc/mpi',
-                                           'name': 'mpi-job-config'}]
-                         }
+                                           'name': 'mpi-job-config'}]}
                     ],
                     'dnsPolicy': 'ClusterFirst',
                     'initContainers': [
-                        {'env': [
-                            {'name': 'TARGET_DIR',
-                             'value': '/opt/kube'}],
+                        # add kubectl so that things can run
+                        {'name': 'kubectl-delivery',
+                         'env': [{'name': 'TARGET_DIR',
+                                  'value': '/opt/kube'}],
                          'image': KUBECTL_IMAGE,
                          'imagePullPolicy': 'Always',
-                         'name': 'kubectl-delivery',
                          'resources': {},
                          'terminationMessagePath': '/dev/termination-log',
                          'terminationMessagePolicy': 'File',
                          'volumeMounts': [{'mountPath': '/opt/kube',
-                                           'name': 'mpi-job-kubectl'}]
-                         },
+                                           'name': 'mpi-job-kubectl'}]},
                         # Need to check state of cluster
                         {'name': 'check-and-filter-cluster-pods',
                          'env': [
@@ -606,7 +600,6 @@ class Controller(BaseHTTPRequestHandler):
                  new_configmap(job, name, configname),
                  new_mpiset(job, name),
                  new_mpilauncher(job, name, configname, job_status['name'])]}
-
 
 # we only handle POST requests
     def do_POST(self):  # pylint: disable=invalid-name

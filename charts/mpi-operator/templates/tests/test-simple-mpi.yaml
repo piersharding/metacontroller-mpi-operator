@@ -1,0 +1,84 @@
+{{ if .Values.helmTests }}
+---
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mpi-test-{{ template "mpi-operator.name" . }}-{{ .Release.Name }}-connection-test
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: mpi-test-{{ template "mpi-operator.name" . }}-connection-test
+    app.kubernetes.io/instance: "{{ .Release.Name }}"
+    app.kubernetes.io/managed-by: "{{ .Release.Service }}"
+    helm.sh/chart: "{{ template "mpi-operator.chart" . }}"
+  annotations:
+    "helm.sh/hook": test-success
+spec:
+  {{- if .Values.pullSecrets }}
+  imagePullSecrets:
+  {{- range .Values.pullSecrets }}
+    - name: {{ . }}
+  {{- end}}
+  {{- end }}
+  volumes:
+  - emptyDir: {}
+    name: mpi-job-kubectl
+  - name: resource
+    configMap:
+      name: mpi-operator-{{ template "mpi-operator.name" . }}-{{ .Release.Name }}
+
+  initContainers:
+  - name: kubectl-delivery
+    env:
+    - name: TARGET_DIR
+      value: /opt/kube
+    image: mpioperator/kubectl-delivery:latest
+    imagePullPolicy: Always
+    resources: {}
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /opt/kube
+      name: mpi-job-kubectl
+
+  containers:
+  - name: simple-test
+    image: piersharding/mpibase:latest
+    imagePullPolicy: IfNotPresent
+    command:
+      - /bin/bash
+    args:
+      - "-c"
+      - >
+        /opt/kube/kubectl apply -f /resource/helm-test-simple.yaml;
+        EGGSIT=0;
+        RES="";
+        while true; do
+          RES=`/opt/kube/kubectl get pod -l job-name=mpioperator--{{ template "mpi-operator.name" . }}-{{ .Release.Name }}-simple-test-launcher -o custom-columns=STATS:.status.phase --no-headers`;
+          if [[ "${RES}" == "Succeeded" ]]; then
+            echo "MPIJob test is completed.";
+            kubectl logs -l job-name=mpioperator--{{ template "mpi-operator.name" . }}-{{ .Release.Name }}-simple-test-launcher;
+            echo 'test OK';
+            EGGSIT=0
+            break;
+          elif [[ "$counter" -gt 10 ]]; then
+            echo "Counter limit reached 10, exit script.";
+            EGGSIT=1
+            break;
+          else
+            let counter++;
+            echo "Waiting [${RES}] 10...";
+            sleep 10;
+          fi;
+          /opt/kube/kubectl delete -f /resource/helm-test-simple.yaml;
+          exit ${EGGSIT}
+
+    volumeMounts:
+    - name: resource
+      mountPath: /resource
+    - mountPath: /opt/kube
+      name: mpi-job-kubectl
+
+  restartPolicy: Never
+
+{{ end }}
