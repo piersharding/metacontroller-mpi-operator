@@ -17,7 +17,8 @@ OPENMPI_VERSION ?= 2.1.2
 WITH_OPENMPI_BUILD ?= false
 KUBECTL_BASE_IMAGE_VERSION ?= 3.9
 KUBECTL_IMAGE ?= piersharding/kubectl-delivery
-MPIBASE_IMAGE ?= piersharding/mpibase:latest
+MPIBASE_TAG ?= $(shell echo $(UBUNTU_BASE_IMAGE) | sed 's/\://')
+MPIBASE_IMAGE ?= piersharding/mpibase
 MYHOST := $(shell hostname)
 
 .PHONY: k8s show lint deploy delete logs describe namespace test clean metalogs help
@@ -35,8 +36,11 @@ k8s: ## Which kubernetes are we connected to
 	@echo ""
 	@echo "Helm version:"
 	@helm version --client
+	@echo ""
+	@echo "Helm plugins:"
+	@helm plugin list
 
-check:
+check: ## Lint check Operator
 	pylint3 charts/mpi-operator/configs/sync.py
 	flake8 charts/mpi-operator/configs/sync.py
 
@@ -63,12 +67,14 @@ push_kubectl: build_kubectl
 	docker push $(KUBECTL_IMAGE):latest
 
 push_mpibase: build_mpibase
-	docker tag mpibase:latest $(MPIBASE_IMAGE)
-	docker push $(MPIBASE_IMAGE)
+	docker tag mpibase:latest $(MPIBASE_IMAGE):$(MPIBASE_TAG)
+	docker push $(MPIBASE_IMAGE):$(MPIBASE_TAG)
+	docker tag mpibase:latest $(MPIBASE_IMAGE):latest
+	docker push $(MPIBASE_IMAGE):latest
 
-build: build_kubectl build_mpibase
+build: build_kubectl build_mpibase  ## build base images
 
-push: build push_kubectl push_mpibase
+push: build push_kubectl push_mpibase  ## push base images
 
 metacontroller:  ## deploy metacontroller
 	kubectl create namespace metacontroller
@@ -189,7 +195,6 @@ describe: ## describe Pods executed from Helm chart
 	echo "---------------------------------------------------"; \
 	echo ""; echo ""; echo ""; \
 	done
-
 
 helm_tests:  ## run Helm chart tests
 	helm tiller run $(OPERATOR_NAMESPACE) -- helm test $(HELM_RELEASE) --cleanup
